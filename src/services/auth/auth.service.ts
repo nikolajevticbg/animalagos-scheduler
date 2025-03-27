@@ -47,13 +47,29 @@ export class AuthService {
    * @returns Whether login was successful
    */
   async login(credentials: { email: string; password: string }): Promise<boolean> {
+    console.log(`[${this.serviceName}] Logging in to Animalagos portal...`);
+    
     try {
+      // Get the login page first
       await this.getLoginPage();
-      return await this.submitLoginForm(credentials);
+      
+      // Submit the login form
+      const loginSuccess = await this.submitLoginForm(credentials);
+      
+      if (loginSuccess) {
+        console.log(`[${this.serviceName}] Successfully logged in to Animalagos portal!`);
+        
+        // Log debug information about the landing page after login
+        await this.logLandingPageDetails();
+      } else {
+        console.error(`[${this.serviceName}] Failed to login to Animalagos portal!`);
+      }
+      
+      return loginSuccess;
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error(`[${this.serviceName}] Authentication error: ${errorMessage}`);
-      throw new Error(`Authentication failed: ${errorMessage}`);
+      console.error(`[${this.serviceName}] Login error: ${errorMessage}`);
+      return false;
     }
   }
 
@@ -220,5 +236,79 @@ export class AuthService {
     
     console.log(`[${this.serviceName}] Session validation ${isValid ? 'successful' : 'failed'}`);
     return isValid;
+  }
+
+  /**
+   * Log details about the landing page after login
+   */
+  private async logLandingPageDetails(): Promise<void> {
+    try {
+      console.log(`[${this.serviceName}] Getting landing page details after login...`);
+      
+      // Just use the base URL and follow redirects naturally
+      const response = await client.get(this.baseUrl, {
+        maxRedirects: 5,
+        headers: {
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Connection': 'keep-alive',
+          'Referer': this.baseUrl,
+        }
+      });
+      
+      const finalUrl = response.request?.res?.responseUrl || this.baseUrl;
+      console.log(`[${this.serviceName}] Landing page URL: ${finalUrl}`);
+      console.log(`[${this.serviceName}] Landing page status: ${response.status}`);
+      console.log(`[${this.serviceName}] Landing page headers: ${JSON.stringify(response.headers)}`);
+      
+      // Log information about the page content
+      if (typeof response.data === 'string') {
+        // Extract page title
+        const titleMatch = response.data.match(/<title>(.*?)<\/title>/i);
+        const pageTitle = titleMatch ? titleMatch[1] : 'Unknown';
+        console.log(`[${this.serviceName}] Landing page title: ${pageTitle}`);
+        
+        // Log meta description if available
+        const metaDescMatch = response.data.match(/<meta name="description" content="(.*?)"/i);
+        if (metaDescMatch) {
+          console.log(`[${this.serviceName}] Page description: ${metaDescMatch[1]}`);
+        }
+        
+        // Check if we're logged in by looking for certain elements
+        const hasLogoutLink = response.data.includes('logout') || response.data.includes('sign out');
+        const hasUserProfile = response.data.includes('profile') || response.data.includes('account');
+        console.log(`[${this.serviceName}] Page contains logout link: ${hasLogoutLink}`);
+        console.log(`[${this.serviceName}] Page contains user profile references: ${hasUserProfile}`);
+        
+        // Save HTML for debug purposes
+        this.saveHtmlForDebugging(response.data, 'landing-page.html');
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[${this.serviceName}] Error getting landing page details: ${errorMessage}`);
+    }
+  }
+
+  /**
+   * Save HTML content to a file for debugging
+   */
+  private saveHtmlForDebugging(html: string, filename: string): void {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      
+      // Create output directory if it doesn't exist
+      const outputDir = path.join(process.cwd(), 'output');
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir);
+      }
+      
+      const filePath = path.join(outputDir, filename);
+      fs.writeFileSync(filePath, html);
+      console.log(`[${this.serviceName}] Saved HTML to ${filePath} for debugging`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[${this.serviceName}] Error saving HTML: ${errorMessage}`);
+    }
   }
 } 
