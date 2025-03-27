@@ -42,16 +42,16 @@ function getCredentials(): { email: string; password: string } {
 async function performAuthentication(credentials: { email: string; password: string }): Promise<void> {
   const authService = AuthService.getInstance();
   
-  console.log('[AuthService] Logging in to Animalagos portal...');
-  const isLoggedIn = await authService.login(credentials);
+  console.log('[Scheduler] Logging in to Animalagos portal...');
+  const isLoggedIn = await authService.login(credentials.email, credentials.password);
   
   if (!isLoggedIn) {
-    console.error('[AuthService] Failed to login to Animalagos portal!');
+    console.error('[Scheduler] Failed to login to Animalagos portal!');
     process.exit(1);
     return;
   }
   
-  console.log('[AuthService] Successfully logged in to Animalagos portal!');
+  console.log('[Scheduler] Successfully logged in to Animalagos portal!');
   await validateSession(authService);
 }
 
@@ -59,9 +59,9 @@ async function performAuthentication(credentials: { email: string; password: str
  * Validate the current session
  */
 async function validateSession(authService: AuthService): Promise<void> {
-  console.log('[AuthService] Validating session...');
+  console.log('[Scheduler] Validating session...');
   const isSessionValid = await authService.validateSession();
-  console.log(`[AuthService] Session is ${isSessionValid ? 'valid' : 'invalid'}`);
+  console.log(`[Scheduler] Session is ${isSessionValid ? 'valid' : 'invalid'}`);
 }
 
 /**
