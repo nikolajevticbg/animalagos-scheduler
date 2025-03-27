@@ -1,0 +1,8 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Use PRD.md document in docs/ folder to inform about project goals in general
+
+Use docs/implementation.md file to check implementation details

@@ -52,7 +52,6 @@ export class AuthService {
       const { jar } = client.defaults;
       if (jar) {
         jar.removeAllCookiesSync();
-        console.log(`[${this.serviceName}] Cleared existing cookies`);
       }
 
       // Submit the login form with credentials
@@ -63,11 +62,8 @@ export class AuthService {
         return false;
       }
       
-      console.log(`[${this.serviceName}] Login successful, checking session cookie`);
-      
       // Get session cookie after login
       const sessionCookie = this.getSessionCookie();
-      console.log(`[${this.serviceName}] Session cookie after login: ${sessionCookie || 'None'}`);
       
       if (!sessionCookie) {
         console.error(`[${this.serviceName}] No session cookie found after successful login`);
@@ -79,10 +75,6 @@ export class AuthService {
       
       // Navigate to the artist timeline page
       await this.navigateToArtistTimeline();
-      
-      // Log cookies again after navigation
-      console.log(`[${this.serviceName}] Session cookies after navigation:`);
-      this.logCookies();
       
       return true;
     } catch (error: unknown) {
@@ -101,44 +93,25 @@ export class AuthService {
    * Get the login page to capture session cookies
    */
   private async getLoginPage(): Promise<void> {
-    console.log(`[${this.serviceName}] Attempting to get login page at ${this.loginUrl}`);
     const response = await client.get(this.loginUrl);
-    console.log(`[${this.serviceName}] Login page loaded with status: ${response.status}`);
-
+    
     // Now access the artist login page to capture any additional cookies
-    console.log(`[${this.serviceName}] Accessing artist login page at ${this.artistLoginUrl}`);
     const artistLoginResponse = await client.get(this.artistLoginUrl);
-    console.log(`[${this.serviceName}] Artist login page loaded with status: ${artistLoginResponse.status}`);
   }
 
   /**
    * Submit the login form to authenticate
    */
   private async submitLoginForm(email: string, password: string): Promise<boolean> {
-    console.log(`[${this.serviceName}] Submitting login form`);
-    
     // Configure axios to automatically follow redirects
     const originalMaxRedirects = client.defaults.maxRedirects;
     client.defaults.maxRedirects = 5;
     
     try {
       // Get the login page to extract any hidden fields
-      console.log(`[${this.serviceName}] Getting login page to extract form fields`);
       const loginPageResponse = await client.get(this.artistLoginUrl);
       
-      // Log response details
-      console.log(`[${this.serviceName}] Login page response status: ${loginPageResponse.status}`);
-      
-      // Check for any cookies set in the login page response
-      const loginPageCookies = loginPageResponse.headers['set-cookie'];
-      if (loginPageCookies) {
-        console.log(`[${this.serviceName}] Login page set cookies: ${loginPageCookies}`);
-      } else {
-        console.log(`[${this.serviceName}] No cookies set by login page`);
-      }
-      
       // Extract form fields
-      console.log(`[${this.serviceName}] Extracting form fields from login page`);
       
       // Extract any ASP.NET specific hidden fields
       const viewStateMatch = loginPageResponse.data.match(/id="__VIEWSTATE" value="([^"]*?)"/);
@@ -156,18 +129,13 @@ export class AuthService {
       // Add ASP.NET specific fields if found
       if (viewStateMatch) {
         formData['__VIEWSTATE'] = viewStateMatch[1];
-        console.log(`[${this.serviceName}] Added __VIEWSTATE (${viewStateMatch[1].length} chars)`);
       }
       if (viewStateGeneratorMatch) {
         formData['__VIEWSTATEGENERATOR'] = viewStateGeneratorMatch[1];
-        console.log(`[${this.serviceName}] Added __VIEWSTATEGENERATOR: ${viewStateGeneratorMatch[1]}`);
       }
       if (eventValidationMatch) {
         formData['__EVENTVALIDATION'] = eventValidationMatch[1];
-        console.log(`[${this.serviceName}] Added __EVENTVALIDATION (${eventValidationMatch[1].length} chars)`);
       }
-      
-      console.log(`[${this.serviceName}] Form data keys: ${Object.keys(formData).join(', ')}`);
       
       // Add headers including any cookies from the login page
       const headers = {
@@ -180,37 +148,20 @@ export class AuthService {
         'Cookie': ''
       };
       
-      // Log the request headers
-      console.log(`[${this.serviceName}] Request headers: ${JSON.stringify(headers)}`);
-      
       // Submit the login form
-      console.log(`[${this.serviceName}] Submitting login form to ${this.artistLoginUrl}`);
       const response = await client.post(this.artistLoginUrl, formData, { headers });
-      
-      // Log response details
-      console.log(`[${this.serviceName}] Response status: ${response.status}`);
-      console.log(`[${this.serviceName}] Response headers: ${JSON.stringify(response.headers)}`);
       
       // Check for any cookies set in the response
       const responseCookies = response.headers['set-cookie'];
       if (responseCookies) {
-        console.log(`[${this.serviceName}] Response set cookies: ${responseCookies}`);
-        
-        // Parse the cookies
         this.parseCookies(responseCookies);
-      } else {
-        console.log(`[${this.serviceName}] Response cookies: undefined`);
       }
       
       // Check if we've been redirected to a post-login page
       const finalUrl = response.request?.res?.responseUrl || '';
       
-      console.log(`[${this.serviceName}] Login request completed with status ${response.status}`);
-      console.log(`[${this.serviceName}] Final URL after redirects: ${finalUrl}`);
-      
       // If the finalUrl doesn't include 'login', we were successfully redirected to a logged-in area
       this.isAuthenticated = response.status === 200 && !finalUrl.includes('/login');
-      console.log(`[${this.serviceName}] Login ${this.isAuthenticated ? 'successful' : 'failed'}`);
       
       return this.isAuthenticated;
     } catch (error: unknown) {
@@ -227,42 +178,21 @@ export class AuthService {
    * Parse cookies from response headers
    */
   private parseCookies(cookieHeaders: string[]): void {
-    console.log(`[${this.serviceName}] Parsing ${cookieHeaders.length} cookies...`);
+    const { jar } = client.defaults;
+    if (!jar) {
+      return;
+    }
     
-    cookieHeaders.forEach((cookieStr, index) => {
+    for (const cookieStr of cookieHeaders) {
       try {
-        // Extract cookie name and value
-        const cookieMain = cookieStr.split(';')[0];
-        const [name, value] = cookieMain.split('=');
-        
-        console.log(`[${this.serviceName}] Cookie ${index + 1}: ${name}=${value}`);
-        
-        // Extract other cookie attributes
-        const attributes: Record<string, string> = {};
-        
-        cookieStr.split(';').slice(1).forEach(attr => {
-          const trimmedAttr = attr.trim();
-          if (trimmedAttr.includes('=')) {
-            const [key, val] = trimmedAttr.split('=');
-            attributes[key.trim().toLowerCase()] = val;
-          } else {
-            attributes[trimmedAttr.toLowerCase()] = 'true';
-          }
-        });
-        
-        console.log(`[${this.serviceName}] Cookie ${name} attributes:`, JSON.stringify(attributes));
-        
-        // Check if this is an authentication cookie
-        if (name.toLowerCase().includes('auth') || 
-            name.toLowerCase().includes('session') || 
-            name.toLowerCase().includes('id') ||
-            name.toLowerCase().includes('asp')) {
-          console.log(`[${this.serviceName}] Found potential authentication cookie: ${name}`);
+        const cookie = Cookie.parse(cookieStr);
+        if (cookie) {
+          jar.setCookieSync(cookie, this.baseUrl);
         }
       } catch (error) {
-        console.error(`[${this.serviceName}] Error parsing cookie: ${cookieStr}`, error);
+        console.error(`[${this.serviceName}] Error parsing cookie: ${error}`);
       }
-    });
+    }
   }
 
   /**
@@ -307,228 +237,54 @@ export class AuthService {
   }
 
   /**
-   * Log details about the landing page after login
+   * Get the session cookie
    */
-  private async logLandingPageDetails(): Promise<void> {
-    try {
-      console.log(`[${this.serviceName}] Getting landing page details after login...`);
-      
-      // Just use the base URL and follow redirects naturally
-      const response = await client.get(this.baseUrl, {
-        maxRedirects: 5,
-        headers: {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Connection': 'keep-alive',
-          'Referer': this.baseUrl,
-        }
-      });
-      
-      const finalUrl = response.request?.res?.responseUrl || this.baseUrl;
-      console.log(`[${this.serviceName}] Landing page URL: ${finalUrl}`);
-      console.log(`[${this.serviceName}] Landing page status: ${response.status}`);
-      console.log(`[${this.serviceName}] Landing page headers: ${JSON.stringify(response.headers)}`);
-      
-      // Log information about the page content
-      if (typeof response.data === 'string') {
-        // Extract page title
-        const titleMatch = response.data.match(/<title>(.*?)<\/title>/i);
-        const pageTitle = titleMatch ? titleMatch[1] : 'Unknown';
-        console.log(`[${this.serviceName}] Landing page title: ${pageTitle}`);
-        
-        // Log meta description if available
-        const metaDescMatch = response.data.match(/<meta name="description" content="(.*?)"/i);
-        if (metaDescMatch) {
-          console.log(`[${this.serviceName}] Page description: ${metaDescMatch[1]}`);
-        }
-        
-        // Check if we're logged in by looking for certain elements
-        const hasLogoutLink = response.data.includes('logout') || response.data.includes('sign out');
-        const hasUserProfile = response.data.includes('profile') || response.data.includes('account');
-        console.log(`[${this.serviceName}] Page contains logout link: ${hasLogoutLink}`);
-        console.log(`[${this.serviceName}] Page contains user profile references: ${hasUserProfile}`);
-        
-        // Look for the select element with name="c"
-        console.log(`[${this.serviceName}] Searching for select element with name="c"...`);
-        const selectRegex = /<select[^>]*name="c"[^>]*>([\s\S]*?)<\/select>/i;
-        const selectMatch = response.data.match(selectRegex);
-        
-        if (selectMatch && selectMatch[1]) {
-          console.log(`[${this.serviceName}] Found select element with name="c"`);
-          const selectContent = selectMatch[0]; // The entire select element
-          console.log(`[${this.serviceName}] Select element: ${selectContent.substring(0, 100)}...`);
-          
-          // Extract all options
-          const optionsRegex = /<option[^>]*value="([^"]*)"[^>]*>([\s\S]*?)<\/option>/g;
-          const options: { value: string; text: string }[] = [];
-          let match;
-          
-          while ((match = optionsRegex.exec(selectContent)) !== null) {
-            const value = match[1].trim();
-            const text = match[2].trim();
-            
-            if (value || text) {
-              options.push({ value, text });
-            }
-          }
-          
-          console.log(`[${this.serviceName}] Found ${options.length} options in select element`);
-          
-          // Print all options
-          options.forEach((option, index) => {
-            console.log(`[${this.serviceName}] Option ${index + 1}: Value="${option.value}" Text="${option.text}"`);
-          });
-        } else {
-          console.log(`[${this.serviceName}] Select element with name="c" not found`);
-          
-          // Check if the element might be in a different page
-          console.log(`[${this.serviceName}] Checking for links that might contain the select element...`);
-          
-          // Find links to potential pages where the select element might be
-          const calendarLink = response.data.match(/href="([^"]*calendar[^"]*)"/i);
-          const formLink = response.data.match(/href="([^"]*form[^"]*)"/i);
-          const applicationsLink = response.data.match(/href="([^"]*application[^"]*)"/i);
-          const artistAreaLink = response.data.match(/href="([^"]*artista[^"]*)"/i);
-          
-          const linksToCheck = [];
-          
-          if (calendarLink && calendarLink[1]) {
-            const url = this.resolveUrl(calendarLink[1]);
-            console.log(`[${this.serviceName}] Found link to calendar: ${url}`);
-            linksToCheck.push(url);
-          }
-          
-          if (formLink && formLink[1]) {
-            const url = this.resolveUrl(formLink[1]);
-            console.log(`[${this.serviceName}] Found link to form: ${url}`);
-            linksToCheck.push(url);
-          }
-          
-          if (applicationsLink && applicationsLink[1]) {
-            const url = this.resolveUrl(applicationsLink[1]);
-            console.log(`[${this.serviceName}] Found link to applications: ${url}`);
-            linksToCheck.push(url);
-          }
-          
-          if (artistAreaLink && artistAreaLink[1]) {
-            const url = this.resolveUrl(artistAreaLink[1]);
-            console.log(`[${this.serviceName}] Found link to artist area: ${url}`);
-            linksToCheck.push(url);
-          }
-          
-          // Check all links in sequence
-          for (const url of linksToCheck) {
-            await this.checkPageForSelectElement(url);
-          }
-        }
-        
-        // Save HTML for debug purposes
-        this.saveHtmlForDebugging(response.data, 'landing-page.html');
-      }
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error(`[${this.serviceName}] Error getting landing page details: ${errorMessage}`);
+  private getSessionCookie(): string | null {
+    const { jar } = client.defaults;
+    if (!jar) {
+      return null;
     }
+    
+    const cookies = jar.getCookiesSync(this.baseUrl);
+    const sessionCookies = cookies.filter(cookie => {
+      return cookie.key === 'ASP.NET_SessionId' || 
+             cookie.key === '.ASPXAUTH' || 
+             cookie.key.includes('session');
+    });
+    
+    if (sessionCookies.length === 0) {
+      return null;
+    }
+    
+    return sessionCookies[0].toString();
   }
 
   /**
-   * Save HTML content to a file for debugging
+   * Navigate to the landing page after login
    */
-  private saveHtmlForDebugging(html: string, filename: string): void {
+  private async navigateToLandingPage(): Promise<void> {
     try {
-      const fs = require('fs');
-      const path = require('path');
+      // Define the landing page URL
+      const url = `${this.baseUrl}/artista/`;
       
-      // Create debug directory if it doesn't exist
-      const debugDir = path.join(process.cwd(), 'debug');
-      if (!fs.existsSync(debugDir)) {
-        fs.mkdirSync(debugDir, { recursive: true });
-      }
-      
-      // Save HTML file
-      const filepath = path.join(debugDir, filename);
-      fs.writeFileSync(filepath, html);
-      console.log(`[${this.serviceName}] Saved HTML to ${filepath}`);
-    } catch (error) {
-      console.error(`[${this.serviceName}] Error saving HTML for debugging:`, error);
-    }
-  }
-
-  /**
-   * Check a specific page for the select element
-   */
-  private async checkPageForSelectElement(url: string): Promise<void> {
-    try {
-      console.log(`[${this.serviceName}] Checking page at ${url} for select element...`);
-      
+      // Navigate to the landing page
       const response = await client.get(url, {
-        maxRedirects: 5,
         headers: {
+          'Referer': this.artistLoginUrl,
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/109.0',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Connection': 'keep-alive',
-          'Referer': this.baseUrl,
+          'Accept-Language': 'en-US,en;q=0.5'
         }
       });
       
-      const finalUrl = response.request?.res?.responseUrl || url;
-      console.log(`[${this.serviceName}] Page URL: ${finalUrl}`);
-      console.log(`[${this.serviceName}] Page status: ${response.status}`);
-      
-      if (typeof response.data === 'string') {
-        // Look for the select element with name="c"
-        const selectRegex = /<select[^>]*name="c"[^>]*>([\s\S]*?)<\/select>/i;
-        const selectMatch = response.data.match(selectRegex);
-        
-        if (selectMatch && selectMatch[0]) {
-          console.log(`[${this.serviceName}] Found select element with name="c" on page: ${finalUrl}`);
-          const selectContent = selectMatch[0]; // The entire select element
-          
-          // Extract all options
-          const optionsRegex = /<option[^>]*value="([^"]*)"[^>]*>([\s\S]*?)<\/option>/g;
-          const options: { value: string; text: string }[] = [];
-          let match;
-          
-          while ((match = optionsRegex.exec(selectContent)) !== null) {
-            const value = match[1].trim();
-            const text = match[2].trim();
-            
-            if (value || text) {
-              options.push({ value, text });
-            }
-          }
-          
-          console.log(`[${this.serviceName}] Found ${options.length} options in select element`);
-          
-          // Print all options
-          options.forEach((option, index) => {
-            console.log(`[${this.serviceName}] Option ${index + 1}: Value="${option.value}" Text="${option.text}"`);
-          });
-          
-          // Save this HTML for debugging
-          this.saveHtmlForDebugging(response.data, `page-with-select-${new Date().getTime()}.html`);
-        } else {
-          console.log(`[${this.serviceName}] Select element with name="c" not found on page: ${finalUrl}`);
-        }
+      // Check if we received a good response
+      if (response.status !== 200) {
+        throw new Error(`Failed to navigate to landing page. Status code: ${response.status}`);
       }
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error(`[${this.serviceName}] Error checking page for select element: ${errorMessage}`);
-    }
-  }
-
-  /**
-   * Resolve a relative URL to an absolute URL
-   */
-  private resolveUrl(url: string): string {
-    if (url.startsWith('http')) {
-      return url;
-    } else if (url.startsWith('/')) {
-      // URL is absolute path
-      return `${this.baseUrl}${url}`;
-    } else {
-      // URL is relative path
-      return `${this.baseUrl}/${url}`;
+      console.error(`[${this.serviceName}] Error navigating to landing page: ${errorMessage}`);
+      throw error;
     }
   }
 
@@ -537,206 +293,312 @@ export class AuthService {
    */
   private async navigateToArtistTimeline(): Promise<void> {
     try {
-      console.log(`[${this.serviceName}] Navigating to artist timeline page...`);
+      // Define the timeline page URL
+      const url = `${this.baseUrl}/artista/timeline`;
       
-      // Get the session cookie
-      const sessionCookie = this.getSessionCookie();
-      console.log(`[${this.serviceName}] Using session cookie: ${sessionCookie || 'None'}`);
-      
-      // Try several possible URLs for the timeline page
-      const urlsToTry = [
-        `${this.baseUrl}/artista/timeline`,
-        `${this.baseUrl}/artista/`,
-        `${this.baseUrl}/artista/calendario`
-      ];
-      
-      for (const url of urlsToTry) {
-        console.log(`[${this.serviceName}] Trying URL: ${url}`);
-        
-        const headers: Record<string, string> = {
+      // Navigate to the timeline page
+      const response = await client.get(url, {
+        headers: {
+          'Referer': `${this.baseUrl}/artista/`,
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/109.0',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Connection': 'keep-alive',
-          'Referer': this.baseUrl,
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/109.0'
-        };
+          'Accept-Language': 'en-US,en;q=0.5'
+        }
+      });
+      
+      // Check if we received a good response
+      if (response.status !== 200) {
+        throw new Error(`Failed to navigate to artist timeline. Status code: ${response.status}`);
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[${this.serviceName}] Error navigating to artist timeline: ${errorMessage}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all available locations (streets/plazas)
+   */
+  async getLocations(): Promise<{ id: string; name: string }[]> {
+    try {
+      // Navigate to the calendar page to get location information
+      const url = `${this.baseUrl}/artista/calendario`;
+      const response = await client.get(url);
+      
+      // Check if we received a good response
+      if (response.status !== 200) {
+        throw new Error(`Failed to navigate to calendar page. Status code: ${response.status}`);
+      }
+      
+      // Extract locations from HTML
+      const locations = this.extractLocationsFromHtml(response.data);
+      
+      // If no locations found in HTML, try extracting from JavaScript
+      if (locations.length === 0) {
+        return this.extractLocationsFromJavaScript(response.data);
+      }
+      
+      return locations;
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[${this.serviceName}] Error getting locations: ${errorMessage}`);
+      return [];
+    }
+  }
+
+  /**
+   * Extract locations from HTML
+   */
+  private extractLocationsFromHtml(html: string): { id: string; name: string }[] {
+    try {
+      // Direct extraction of nomerua select element
+      const nomeruaSelectRegex = /<select[^>]*name="nomerua"[^>]*>[\s\S]*?<\/select>/i;
+      const nomeruaMatch = html.match(nomeruaSelectRegex);
+      
+      if (nomeruaMatch && nomeruaMatch[0]) {
+        console.log(`[${this.serviceName}] Found nomerua select element, extracting options`);
+        const selectContent = nomeruaMatch[0];
         
-        // Add cookie header if we have a session cookie
-        if (sessionCookie) {
-          headers['Cookie'] = sessionCookie;
+        // Extract options directly
+        const options: { id: string; name: string }[] = [];
+        const optionsRegex = /<option(?:\s+value="([^"]*)")?\s*>([^<]*)<\/option>/g;
+        let match;
+        
+        while ((match = optionsRegex.exec(selectContent)) !== null) {
+          const id = match[1] || '';
+          const rawName = match[2] || '';
+          
+          // Fix encoding issues (Latin1/Windows-1252 encoded characters)
+          const name = this.fixEncoding(rawName).trim();
+          
+          if (name && name !== 'Rua/ Praça' && name !== 'Todos' && name !== 'Rua/ Praça') {
+            console.log(`[${this.serviceName}] Found location: "${name}" (ID: "${id}")`);
+            options.push({ id: id || name, name });
+          }
         }
         
-        const response = await client.get(url, {
-          maxRedirects: 5,
-          withCredentials: true,
-          headers
-        });
+        if (options.length > 0) {
+          console.log(`[${this.serviceName}] Extracted ${options.length} locations from nomerua select`);
+          return options;
+        }
+      }
+      
+      const locations: { id: string; name: string }[] = [];
+      
+      // Look for different possible select elements for locations
+      const selectNames = ['nomerua', 'c', 'rua', 'street', 'location'];
+      
+      for (const name of selectNames) {
+        // Try with double quotes
+        const regex1 = new RegExp(`<select[^>]*name="${name}"[^>]*>[\\s\\S]*?<\\/select>`, 'i');
+        // Try with single quotes
+        const regex2 = new RegExp(`<select[^>]*name='${name}'[^>]*>[\\s\\S]*?<\\/select>`, 'i');
         
-        const finalUrl = response.request?.res?.responseUrl || url;
-        console.log(`[${this.serviceName}] Page URL: ${finalUrl}`);
-        console.log(`[${this.serviceName}] Page status: ${response.status}`);
+        let selectMatch = html.match(regex1) || html.match(regex2);
         
-        if (response.status === 200 && typeof response.data === 'string') {
-          // Save HTML for debugging
-          const filename = `page-${url.replace(/[\/:.]/g, '-')}.html`;
-          this.saveHtmlForDebugging(response.data, filename);
+        if (selectMatch && selectMatch[0]) {
+          console.log(`[${this.serviceName}] Found select element with name="${name}"`);
+          const selectContent = selectMatch[0];
+          console.log(`[${this.serviceName}] Select content (first 100 chars): ${selectContent.substring(0, 100)}...`);
           
-          // Check for the select element with name="c"
-          const hasSelectC = this.checkForSelectElement(response.data, url);
+          // Try different option patterns
+          const optionPatterns = [
+            /<option[^>]*value=["']([^"']*)["'][^>]*>([\s\S]*?)<\/option>/g,
+            /<option[^>]*value=([\w\d]+)[^>]*>([\s\S]*?)<\/option>/g
+          ];
           
-          if (hasSelectC) {
-            break; // We found what we needed, stop trying other URLs
+          for (const pattern of optionPatterns) {
+            let match;
+            const tempLocations: { id: string; name: string }[] = [];
+            
+            while ((match = pattern.exec(selectContent)) !== null) {
+              const id = match[1].trim();
+              let name = match[2].trim();
+              
+              // Remove any HTML entities and normalize whitespace
+              name = name.replace(/&[a-z]+;/g, ' ')
+                         .replace(/\s+/g, ' ')
+                         .replace(/<[^>]*>/g, '')
+                         .trim();
+              
+              if (id && name) {
+                tempLocations.push({ id, name });
+              }
+            }
+            
+            if (tempLocations.length > 0) {
+              console.log(`[${this.serviceName}] Extracted ${tempLocations.length} locations from select name="${name}"`);
+              
+              // Log a few locations as a sample
+              const sampleSize = Math.min(tempLocations.length, 5);
+              for (let i = 0; i < sampleSize; i++) {
+                console.log(`[${this.serviceName}] Location ${i + 1}: ID="${tempLocations[i].id}" Name="${tempLocations[i].name}"`);
+              }
+              
+              locations.push(...tempLocations);
+              break;
+            }
+          }
+          
+          if (locations.length > 0) {
+            break;
           }
         }
       }
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error(`[${this.serviceName}] Error navigating to timeline page: ${errorMessage}`);
-    }
-  }
-
-  /**
-   * Get the session cookie
-   */
-  private getSessionCookie(): string | null {
-    try {
-      const { jar } = client.defaults;
       
-      if (jar) {
-        // Get cookies for the domain
-        const cookieString = jar.getCookieStringSync(this.baseUrl);
+      // If we still don't have locations, try a more aggressive approach
+      if (locations.length === 0) {
+        console.log(`[${this.serviceName}] Using more aggressive option extraction`);
         
-        // Find ASP.NET session cookie
-        const cookies = jar.getCookiesSync(this.baseUrl);
-        const sessionCookie = cookies.find(cookie => 
-          cookie.key.toLowerCase().includes('session') || 
-          cookie.key.toLowerCase().includes('asp'));
+        // Find any <option> elements that might be part of a location dropdown
+        const optionRegex = /<option[^>]*value=["']([^"']*)["'][^>]*>((?:Rua|Praça|Avenida|Largo|R\.|Av\.)[\s\S]*?)<\/option>/g;
+        let match;
         
-        if (sessionCookie) {
-          return `${sessionCookie.key}=${sessionCookie.value}`;
+        while ((match = optionRegex.exec(html)) !== null) {
+          const id = match[1].trim();
+          let name = match[2].trim();
+          
+          // Clean the name
+          name = name.replace(/&[a-z]+;/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .replace(/<[^>]*>/g, '')
+                    .trim();
+          
+          if (id && name) {
+            locations.push({ id, name });
+          }
         }
         
-        return cookieString || null;
-      }
-      
-      return null;
-    } catch (error) {
-      console.error(`[${this.serviceName}] Error getting session cookie:`, error);
-      return null;
-    }
-  }
-
-  /**
-   * Check a page for the select element with name="c"
-   */
-  private checkForSelectElement(html: string, url: string): boolean {
-    try {
-      // Check for select element with name="c" (for calendario)
-      const hasSelectC = html.includes('<select name="c"') || 
-                         html.includes("name='c'") || 
-                         html.includes('name="nomeartista"') ||
-                         html.includes("name='nomeartista'");
-      
-      if (hasSelectC) {
-        console.log(`[${this.serviceName}] Found select element in URL: ${url}`);
-        return true;
-      } else {
-        console.log(`[${this.serviceName}] No select element found in URL: ${url}`);
-        // Check if we see login form again
-        const hasLoginForm = html.includes('action="/web/login"') || 
-                            html.includes('name="email"') && html.includes('name="senha"');
-        
-        if (hasLoginForm) {
-          console.log(`[${this.serviceName}] Found login form - session may have expired`);
+        if (locations.length > 0) {
+          console.log(`[${this.serviceName}] Found ${locations.length} locations using aggressive extraction`);
+          
+          // Log a sample
+          const sampleSize = Math.min(locations.length, 5);
+          for (let i = 0; i < sampleSize; i++) {
+            console.log(`[${this.serviceName}] Location ${i + 1}: ID="${locations[i].id}" Name="${locations[i].name}"`);
+          }
         }
-        return false;
       }
+      
+      return locations;
     } catch (error) {
-      console.error(`[${this.serviceName}] Error checking for select element:`, error);
-      return false;
+      console.error(`[${this.serviceName}] Error extracting locations:`, error);
+      return [];
     }
   }
 
   /**
-   * Log cookies in the cookie jar
+   * Fix encoding issues in text
    */
-  private logCookies(): void {
-    try {
-      // Import the cookie jar from the Axios client
-      const { jar } = client.defaults;
-      
-      if (jar) {
-        console.log(`[${this.serviceName}] Checking cookie jar...`);
-        
-        // Get cookies for the domain
-        const cookieString = jar.getCookieStringSync(this.baseUrl);
-        console.log(`[${this.serviceName}] Cookie string for ${this.baseUrl}: ${cookieString || 'No cookies'}`);
-        
-        // Get all cookies
-        const cookies = jar.getCookiesSync(this.baseUrl);
-        console.log(`[${this.serviceName}] Found ${cookies.length} cookies`);
-        
-        // Log each cookie
-        cookies.forEach((cookie, index) => {
-          console.log(`[${this.serviceName}] Cookie ${index + 1}: ${cookie.key}=${cookie.value}; Domain=${cookie.domain}; Path=${cookie.path}; Expires=${cookie.expires}; HttpOnly=${cookie.httpOnly}; Secure=${cookie.secure}`);
-        });
-      } else {
-        console.log(`[${this.serviceName}] No cookie jar available`);
-      }
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error(`[${this.serviceName}] Error logging cookies: ${errorMessage}`);
-    }
+  private fixEncoding(text: string): string {
+    return text
+      // Common HTML entities
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      // Special Portuguese characters
+      .replace(/\u00E7|\u00C7/g, 'ç') // ç/Ç
+      .replace(/\u00E1|\u00C1/g, 'á') // á/Á
+      .replace(/\u00E9|\u00C9/g, 'é') // é/É
+      .replace(/\u00ED|\u00CD/g, 'í') // í/Í
+      .replace(/\u00F3|\u00D3/g, 'ó') // ó/Ó
+      .replace(/\u00FA|\u00DA/g, 'ú') // ú/Ú
+      .replace(/\u00E2|\u00C2/g, 'â') // â/Â
+      .replace(/\u00EA|\u00CA/g, 'ê') // ê/Ê
+      .replace(/\u00F4|\u00D4/g, 'ô') // ô/Ô
+      .replace(/\u00E3|\u00C3/g, 'ã') // ã/Ã
+      .replace(/\u00F5|\u00D5/g, 'õ') // õ/Õ
+      // Fix problematic characters
+      .replace(/Pra.a/g, 'Praça')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   /**
-   * Navigate to the landing page after login
+   * Extract locations from JavaScript data in the HTML
    */
-  private async navigateToLandingPage(): Promise<void> {
+  private extractLocationsFromJavaScript(html: string): { id: string; name: string }[] {
     try {
-      console.log(`[${this.serviceName}] Navigating to landing page...`);
+      const locations: { id: string; name: string }[] = [];
       
-      const landingUrl = `${this.baseUrl}/`;
+      // Look for JavaScript arrays containing locations
+      // Pattern 1: var arrayRuas = [ {'value': 'value1', 'text': 'text1'}, ... ]
+      const arrayPattern1 = /var\s+array(?:Ruas|Locais|Streets|Locations)\s*=\s*\[(.*?)\];/s;
+      const arrayMatch1 = html.match(arrayPattern1);
       
-      const headers: Record<string, string> = {
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Connection': 'keep-alive',
-        'Referer': `${this.baseUrl}/web/login?perfil=Artista`,
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/109.0'
-      };
-      
-      // Get the session cookie
-      const sessionCookie = this.getSessionCookie();
-      if (sessionCookie) {
-        headers['Cookie'] = sessionCookie;
+      if (arrayMatch1 && arrayMatch1[1]) {
+        console.log(`[${this.serviceName}] Found JavaScript array of locations`);
+        
+        // Extract each location object
+        const objectPattern = /{\s*['"]value['"]\s*:\s*['"]([^'"]*)['"]\s*,\s*['"]text['"]\s*:\s*['"]([^'"]*)['"]\s*}/g;
+        let match;
+        
+        while ((match = objectPattern.exec(arrayMatch1[1])) !== null) {
+          const id = match[1].trim();
+          const name = match[2].trim();
+          
+          if (id && name) {
+            locations.push({ id, name });
+          }
+        }
       }
       
-      const response = await client.get(landingUrl, {
-        maxRedirects: 5,
-        withCredentials: true,
-        headers
-      });
-      
-      const finalUrl = response.request?.res?.responseUrl || landingUrl;
-      console.log(`[${this.serviceName}] Landing page URL: ${finalUrl}`);
-      console.log(`[${this.serviceName}] Landing page status: ${response.status}`);
-      
-      if (response.status === 200 && typeof response.data === 'string') {
-        // Save HTML for debugging
-        const filename = `page-landing.html`;
-        this.saveHtmlForDebugging(response.data, filename);
+      // Pattern 2: Options directly embedded in JavaScript
+      if (locations.length === 0) {
+        // Look for option arrays like: ['Option 1', 'Option 2', ...]
+        const optionArrayPattern = /\[(['"][^'"]*['"](?:\s*,\s*['"][^'"]*['"])*)\]/g;
+        let arrayMatch;
         
-        // Check if there's a logout link or user profile reference
-        const hasLogoutLink = response.data.includes('logout') || response.data.includes('Logout');
-        const hasUserProfile = response.data.includes('profile') || response.data.includes('Profile');
-        
-        console.log(`[${this.serviceName}] Landing page has logout link: ${hasLogoutLink}`);
-        console.log(`[${this.serviceName}] Landing page has user profile reference: ${hasUserProfile}`);
+        while ((arrayMatch = optionArrayPattern.exec(html)) !== null) {
+          const optionsString = arrayMatch[1];
+          const options = optionsString.split(',').map(opt => 
+            opt.trim().replace(/^['"]|['"]$/g, '')
+          );
+          
+          // If this looks like a list of locations, use it
+          const hasLocationNames = options.some(opt => 
+            opt.includes('Rua') || 
+            opt.includes('Praça') || 
+            opt.includes('Avenida') ||
+            opt.includes('Largo'));
+          
+          if (hasLocationNames) {
+            options.forEach((name, index) => {
+              if (name.trim()) {
+                locations.push({ 
+                  id: String(index + 1), 
+                  name: name.trim() 
+                });
+              }
+            });
+            break;
+          }
+        }
       }
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error(`[${this.serviceName}] Error navigating to landing page: ${errorMessage}`);
+      
+      // Pattern 3: Look for select population code
+      if (locations.length === 0) {
+        const selectPopulationPattern = /\$\(["']#(?:rua|location|street|c|nomerua)["']\)\.append\(["']<option[^>]*value=["']([^"']*)["'][^>]*>(.*?)<\/option>["']\)/g;
+        let match;
+        
+        while ((match = selectPopulationPattern.exec(html)) !== null) {
+          const id = match[1].trim();
+          const name = match[2].replace(/\\["']/g, '').trim();
+          
+          if (id && name) {
+            locations.push({ id, name });
+          }
+        }
+      }
+      
+      return locations;
+    } catch (error) {
+      console.error(`[${this.serviceName}] Error extracting locations from JavaScript:`, error);
+      return [];
     }
   }
 } 
