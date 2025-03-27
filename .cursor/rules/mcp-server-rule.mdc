@@ -1,0 +1,20 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+
+# Model context protocol server
+
+## Sequential thinking
+
+- Use **sequential thinking** MCP for debugging, troubleshooting, complex problem-solving, and detailed project planning.
+- Avoid excessive recursive calls; trigger intelligently only when new progress or significant information is possible.
+
+
+## Browser tools
+
+- **Browser tools MCP** requires user confirmation. Always recommend the user to explicitly start the server and ensure Chrome browser is running before using browser tools MCP.
+- Let the user explicitly instruct when the Browser tools should be used
+- Remind user to disable **Puppeteer** before attempting to use
+
