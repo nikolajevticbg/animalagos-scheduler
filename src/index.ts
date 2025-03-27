@@ -1,6 +1,5 @@
 import dotenv from 'dotenv';
 import { AuthService } from './services/auth/auth.service';
-import { SessionService } from './services/auth/session.service';
 
 // Load environment variables
 dotenv.config();
@@ -14,6 +13,8 @@ async function main(): Promise<void> {
     
     const credentials = getCredentials();
     await performAuthentication(credentials);
+    
+    console.log('[Scheduler] Login successful. System ready.');
     
   } catch (error: unknown) {
     handleError(error);
