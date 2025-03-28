@@ -1,5 +1,7 @@
 import { client } from '../../config/axios.config';
 import { Cookie } from 'tough-cookie';
+import * as fs from 'fs';
+import * as path from 'path';
 
 /**
  * Interface for login form data
@@ -15,6 +17,18 @@ interface LoginFormData {
 }
 
 /**
+ * Interface for redirection response
+ */
+interface RedirectionResponse {
+  url: string;
+  status: number;
+  statusText: string;
+  redirectUrl?: string;
+  headers: Record<string, any>;
+  timestamp: string;
+}
+
+/**
  * Authentication service for Animalagos portal
  */
 export class AuthService {
@@ -24,10 +38,18 @@ export class AuthService {
   private readonly loginUrl: string;
   private readonly artistLoginUrl: string;
   private readonly serviceName = 'AuthService';
+  private readonly debugDir: string;
 
   private constructor() {
     this.loginUrl = `${this.baseUrl}/login?perfil=Artista`;
     this.artistLoginUrl = `${this.baseUrl}/artista/login`;
+    this.debugDir = path.join(process.cwd(), 'debug');
+    
+    // Create debug directory if it doesn't exist
+    if (!fs.existsSync(this.debugDir)) {
+      fs.mkdirSync(this.debugDir, { recursive: true });
+    }
+    
     console.log(`[${this.serviceName}] Initializing authentication service`);
   }
 
@@ -39,6 +61,184 @@ export class AuthService {
       AuthService.instance = new AuthService();
     }
     return AuthService.instance;
+  }
+  
+  /**
+   * Follow redirections and log detailed debug information
+   */
+  async followRedirections(): Promise<void> {
+    console.log(`[${this.serviceName}] Starting to follow redirections`);
+    
+    // URLs to check for redirections
+    const urlsToCheck = [
+      { url: this.baseUrl, description: 'Base URL' },
+      { url: this.loginUrl, description: 'Login URL' },
+      { url: this.artistLoginUrl, description: 'Artist Login URL' },
+      { url: `${this.baseUrl}/artista/`, description: 'Artist Dashboard' },
+      { url: `${this.baseUrl}/artista/timeline`, description: 'Artist Timeline' },
+      { url: `${this.baseUrl}/artista/calendario`, description: 'Artist Calendar' },
+      { url: `${this.baseUrl}/artista/mapa`, description: 'Artist Map' },
+      { url: `${this.baseUrl}/artista/candidatura`, description: 'Artist Application' }
+    ];
+    
+    const redirectionLogs: RedirectionResponse[] = [];
+    
+    for (const { url, description } of urlsToCheck) {
+      console.log(`[${this.serviceName}] Checking redirections for ${description}: ${url}`);
+      
+      // Set up response options to track redirects
+      const originalMaxRedirects = client.defaults.maxRedirects;
+      client.defaults.maxRedirects = 0; // Disable automatic redirects
+      
+      try {
+        // Attempt to access URL
+        await this.followRedirect(url, description, redirectionLogs);
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`[${this.serviceName}] Error following redirects for ${url}: ${errorMessage}`);
+      } finally {
+        // Restore original redirection setting
+        client.defaults.maxRedirects = originalMaxRedirects;
+      }
+    }
+    
+    // Save all redirection logs to a file
+    this.saveRedirectionLogs(redirectionLogs);
+  }
+  
+  /**
+   * Follow a single redirect and log details
+   */
+  private async followRedirect(
+    url: string, 
+    description: string, 
+    redirectionLogs: RedirectionResponse[], 
+    depth = 0, 
+    maxDepth = 10
+  ): Promise<void> {
+    if (depth >= maxDepth) {
+      console.log(`[${this.serviceName}] Maximum redirect depth (${maxDepth}) reached for ${url}`);
+      return;
+    }
+    
+    try {
+      console.log(`[${this.serviceName}] REQUEST: GET ${url}`);
+      
+      // Add cookies to log
+      const { jar } = client.defaults;
+      if (jar) {
+        const cookies = jar.getCookiesSync(this.baseUrl);
+        if (cookies.length > 0) {
+          console.log(`[${this.serviceName}] Cookies: ${cookies.map(c => `${c.key}=${c.value.substring(0, 5)}...`).join('; ')}`);
+        }
+      }
+      
+      // Make the request with validateStatus to accept redirect status codes
+      const response = await client.get(url, {
+        maxRedirects: 0,
+        validateStatus: status => status >= 200 && status < 400
+      });
+      
+      // Get response information
+      const status = response.status;
+      const statusText = response.statusText;
+      const headers = response.headers;
+      const timestamp = new Date().toISOString();
+      
+      // Get final URL if redirected
+      const finalUrl = response.request?.res?.responseUrl || url;
+      const isRedirect = status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
+      const location = headers.location;
+      
+      // Log response details
+      console.log(`[${this.serviceName}] RESPONSE: ${status} ${statusText}`);
+      console.log(`[${this.serviceName}] URL: ${url}`);
+      
+      if (isRedirect && location) {
+        console.log(`[${this.serviceName}] Redirects to: ${location}`);
+      } else if (finalUrl !== url) {
+        console.log(`[${this.serviceName}] Final URL: ${finalUrl}`);
+      }
+      
+      // Log headers
+      console.log(`[${this.serviceName}] Headers: ${JSON.stringify(headers, null, 2)}`);
+      
+      // Save response info to logs
+      const responseInfo: RedirectionResponse = {
+        url,
+        status,
+        statusText,
+        headers,
+        timestamp
+      };
+      
+      if (isRedirect && location) {
+        responseInfo.redirectUrl = location;
+      } else if (finalUrl !== url) {
+        responseInfo.redirectUrl = finalUrl;
+      }
+      
+      redirectionLogs.push(responseInfo);
+      
+      // Save the HTML response for debugging
+      if (typeof response.data === 'string') {
+        // Create a safe filename from the URL
+        const urlFilename = url.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        const filename = `redirect_${depth}_${urlFilename}.html`;
+        this.saveHtmlResponse(response.data, filename);
+      }
+      
+      // If this is a redirect, follow it
+      if (isRedirect && headers.location) {
+        // Construct the redirect URL (handling relative URLs)
+        const redirectUrl = new URL(headers.location, url).toString();
+        console.log(`[${this.serviceName}] Following redirect to: ${redirectUrl}`);
+        
+        // Follow the redirect
+        await this.followRedirect(redirectUrl, `${description} (redirect ${depth + 1})`, redirectionLogs, depth + 1, maxDepth);
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[${this.serviceName}] Error accessing ${url}: ${errorMessage}`);
+      
+      // Add error to logs
+      redirectionLogs.push({
+        url,
+        status: -1,
+        statusText: errorMessage,
+        headers: {},
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+  
+  /**
+   * Save HTML response to file
+   */
+  private saveHtmlResponse(html: string, filename: string): void {
+    try {
+      const filePath = path.join(this.debugDir, filename);
+      fs.writeFileSync(filePath, html);
+      console.log(`[${this.serviceName}] Saved HTML response to ${filePath}`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[${this.serviceName}] Error saving HTML response: ${errorMessage}`);
+    }
+  }
+  
+  /**
+   * Save redirection logs to file
+   */
+  private saveRedirectionLogs(logs: RedirectionResponse[]): void {
+    try {
+      const timestamp = new Date().toISOString().replace(/:/g, '-');
+      const filePath = path.join(this.debugDir, `redirection_logs_${timestamp}.json`);
+      fs.writeFileSync(filePath, JSON.stringify(logs, null, 2));
+      console.log(`[${this.serviceName}] Saved redirection logs to ${filePath}`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[${this.serviceName}] Error saving redirection logs: ${errorMessage}`);
+    }
   }
 
   /**
@@ -53,6 +253,9 @@ export class AuthService {
       if (jar) {
         jar.removeAllCookiesSync();
       }
+
+      // Capture initial cookies from login page
+      await this.getLoginPage();
 
       // Submit the login form with credentials
       const loginSuccess = await this.submitLoginForm(email, password);
@@ -110,8 +313,6 @@ export class AuthService {
     try {
       // Get the login page to extract any hidden fields
       const loginPageResponse = await client.get(this.artistLoginUrl);
-      
-      // Extract form fields
       
       // Extract any ASP.NET specific hidden fields
       const viewStateMatch = loginPageResponse.data.match(/id="__VIEWSTATE" value="([^"]*?)"/);
@@ -248,8 +449,8 @@ export class AuthService {
     const cookies = jar.getCookiesSync(this.baseUrl);
     const sessionCookies = cookies.filter(cookie => {
       return cookie.key === 'ASP.NET_SessionId' || 
-             cookie.key === '.ASPXAUTH' || 
-             cookie.key.includes('session');
+             cookie.key.toLowerCase().includes('auth') ||
+             cookie.key.toLowerCase().includes('session');
     });
     
     if (sessionCookies.length === 0) {
@@ -315,6 +516,176 @@ export class AuthService {
       console.error(`[${this.serviceName}] Error navigating to artist timeline: ${errorMessage}`);
       throw error;
     }
+  }
+
+  /**
+   * Navigate to the artist timeline page with proper redirect handling
+   */
+  async navigateToTimelinePage(): Promise<boolean> {
+    try {
+      console.log(`[${this.serviceName}] Navigating to artist timeline page...`);
+      
+      // Define the timeline page URL
+      const timelineUrl = `${this.baseUrl}/artista/timeline`;
+      
+      // First try direct access - this will likely redirect
+      let response = await client.get(timelineUrl, {
+        maxRedirects: 5, // Allow redirects to be followed
+        validateStatus: (status) => status >= 200 && status < 400,
+        headers: {
+          'Referer': `${this.baseUrl}/artista/`,
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/109.0',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5'
+        }
+      });
+      
+      // Get the final URL after all redirects
+      const finalUrl = response.request?.res?.responseUrl || '';
+      console.log(`[${this.serviceName}] Timeline page redirected to: ${finalUrl}`);
+      
+      // Check if the response contains the expected content for the artists and locations
+      if (typeof response.data === 'string') {
+        const htmlContent = response.data;
+        this.saveHtmlResponse(htmlContent, 'timeline_access_attempt.html');
+        
+        // Check for artist list content
+        const hasArtistList = htmlContent.includes('Artista') && 
+                             (htmlContent.includes('Alina Honcharenko') || 
+                              htmlContent.includes('Barry Mulligan') || 
+                              htmlContent.includes('Dmitrii Briakin'));
+        
+        // Check for location list content
+        const hasLocationList = htmlContent.includes('Rua/ Praça') && 
+                               (htmlContent.includes('Avenida dos Pescadores') || 
+                                htmlContent.includes('Largo Marquês de Pombal') || 
+                                htmlContent.includes('Praça Gil Eanes'));
+        
+        if (hasArtistList || hasLocationList) {
+          console.log(`[${this.serviceName}] Successfully accessed page with artist/location data`);
+          return true;
+        }
+      }
+      
+      // The application redirects most artist URLs to the main page
+      // Let's try accessing the calendar page directly - our analysis showed this works
+      console.log(`[${this.serviceName}] Trying calendar page instead...`);
+      const calendarUrl = `${this.baseUrl}/artista/calendario/`;
+      response = await client.get(calendarUrl, {
+        maxRedirects: 5,
+        validateStatus: (status) => status >= 200 && status < 400,
+        headers: {
+          'Referer': this.baseUrl,
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/109.0',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5'
+        }
+      });
+      
+      // Get the final URL after all redirects
+      const calendarFinalUrl = response.request?.res?.responseUrl || '';
+      console.log(`[${this.serviceName}] Calendar page redirected to: ${calendarFinalUrl}`);
+      
+      // Save the response HTML for inspection
+      if (typeof response.data === 'string') {
+        this.saveHtmlResponse(response.data, 'timeline_redirect_calendar.html');
+        console.log(`[${this.serviceName}] Saved calendar page HTML`);
+        
+        // Check if there might be artist/location content on this page
+        const calendarContent = response.data;
+        
+        // Try one more strategy - make a request to the URL found in the website content
+        if (!calendarContent.includes('Artista') && !calendarContent.includes('Rua/ Praça')) {
+          // Try directly using the URL from our websearch results
+          console.log(`[${this.serviceName}] Making direct request to the known timeline URL`);
+          
+          // Make a direct request without following redirects to examine the response
+          response = await client.get(`${this.baseUrl}/artista/timeline`, {
+            maxRedirects: 0,
+            validateStatus: () => true // Accept any status code for analysis
+          });
+          
+          console.log(`[${this.serviceName}] Direct timeline request status: ${response.status}`);
+          
+          if (response.status === 302) {
+            const redirectLocation = response.headers.location;
+            console.log(`[${this.serviceName}] Attempting to follow redirect to: ${redirectLocation}`);
+            
+            // Follow the redirect manually
+            const redirectUrl = new URL(redirectLocation, `${this.baseUrl}/artista/timeline`).toString();
+            
+            // Follow the redirect with automatic redirect handling
+            response = await client.get(redirectUrl, {
+              maxRedirects: 5,
+              validateStatus: (status) => status >= 200 && status < 400
+            });
+            
+            // Save the response
+            if (typeof response.data === 'string') {
+              this.saveHtmlResponse(response.data, 'timeline_manual_redirect.html');
+              
+              // Check if we got the artist data
+              const redirectContent = response.data;
+              const hasArtistContent = redirectContent.includes('Artista') && 
+                                      redirectContent.includes('Rua/ Praça');
+                                      
+              if (hasArtistContent) {
+                console.log(`[${this.serviceName}] Successfully accessed timeline data after manual redirect`);
+                return true;
+              }
+            }
+          }
+        }
+      }
+      
+      console.log(`[${this.serviceName}] Failed to access timeline page with artist data`);
+      return false;
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[${this.serviceName}] Error navigating to timeline page: ${errorMessage}`);
+      return false;
+    }
+  }
+
+  /**
+   * Clean and normalize HTML content
+   */
+  private cleanHtmlText(text: string): string {
+    return text
+      .replace(/&[a-z]+;/g, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(/<[^>]*>/g, '')
+      .trim();
+  }
+
+  /**
+   * Fix encoding issues in text
+   */
+  private fixEncoding(text: string): string {
+    return text
+      // Common HTML entities
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      // Special Portuguese characters
+      .replace(/\u00E7|\u00C7/g, 'ç') // ç/Ç
+      .replace(/\u00E1|\u00C1/g, 'á') // á/Á
+      .replace(/\u00E9|\u00C9/g, 'é') // é/É
+      .replace(/\u00ED|\u00CD/g, 'í') // í/Í
+      .replace(/\u00F3|\u00D3/g, 'ó') // ó/Ó
+      .replace(/\u00FA|\u00DA/g, 'ú') // ú/Ú
+      .replace(/\u00E2|\u00C2/g, 'â') // â/Â
+      .replace(/\u00EA|\u00CA/g, 'ê') // ê/Ê
+      .replace(/\u00F4|\u00D4/g, 'ô') // ô/Ô
+      .replace(/\u00E3|\u00C3/g, 'ã') // ã/Ã
+      .replace(/\u00F5|\u00D5/g, 'õ') // õ/Õ
+      // Fix problematic characters
+      .replace(/Pra.a/g, 'Praça')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   /**
@@ -400,7 +771,6 @@ export class AuthService {
         if (selectMatch && selectMatch[0]) {
           console.log(`[${this.serviceName}] Found select element with name="${name}"`);
           const selectContent = selectMatch[0];
-          console.log(`[${this.serviceName}] Select content (first 100 chars): ${selectContent.substring(0, 100)}...`);
           
           // Try different option patterns
           const optionPatterns = [
@@ -414,13 +784,7 @@ export class AuthService {
             
             while ((match = pattern.exec(selectContent)) !== null) {
               const id = match[1].trim();
-              let name = match[2].trim();
-              
-              // Remove any HTML entities and normalize whitespace
-              name = name.replace(/&[a-z]+;/g, ' ')
-                         .replace(/\s+/g, ' ')
-                         .replace(/<[^>]*>/g, '')
-                         .trim();
+              let name = this.cleanHtmlText(match[2]);
               
               if (id && name) {
                 tempLocations.push({ id, name });
@@ -429,13 +793,6 @@ export class AuthService {
             
             if (tempLocations.length > 0) {
               console.log(`[${this.serviceName}] Extracted ${tempLocations.length} locations from select name="${name}"`);
-              
-              // Log a few locations as a sample
-              const sampleSize = Math.min(tempLocations.length, 5);
-              for (let i = 0; i < sampleSize; i++) {
-                console.log(`[${this.serviceName}] Location ${i + 1}: ID="${tempLocations[i].id}" Name="${tempLocations[i].name}"`);
-              }
-              
               locations.push(...tempLocations);
               break;
             }
@@ -457,26 +814,10 @@ export class AuthService {
         
         while ((match = optionRegex.exec(html)) !== null) {
           const id = match[1].trim();
-          let name = match[2].trim();
-          
-          // Clean the name
-          name = name.replace(/&[a-z]+;/g, ' ')
-                    .replace(/\s+/g, ' ')
-                    .replace(/<[^>]*>/g, '')
-                    .trim();
+          let name = this.cleanHtmlText(match[2]);
           
           if (id && name) {
             locations.push({ id, name });
-          }
-        }
-        
-        if (locations.length > 0) {
-          console.log(`[${this.serviceName}] Found ${locations.length} locations using aggressive extraction`);
-          
-          // Log a sample
-          const sampleSize = Math.min(locations.length, 5);
-          for (let i = 0; i < sampleSize; i++) {
-            console.log(`[${this.serviceName}] Location ${i + 1}: ID="${locations[i].id}" Name="${locations[i].name}"`);
           }
         }
       }
@@ -486,36 +827,6 @@ export class AuthService {
       console.error(`[${this.serviceName}] Error extracting locations:`, error);
       return [];
     }
-  }
-
-  /**
-   * Fix encoding issues in text
-   */
-  private fixEncoding(text: string): string {
-    return text
-      // Common HTML entities
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      // Special Portuguese characters
-      .replace(/\u00E7|\u00C7/g, 'ç') // ç/Ç
-      .replace(/\u00E1|\u00C1/g, 'á') // á/Á
-      .replace(/\u00E9|\u00C9/g, 'é') // é/É
-      .replace(/\u00ED|\u00CD/g, 'í') // í/Í
-      .replace(/\u00F3|\u00D3/g, 'ó') // ó/Ó
-      .replace(/\u00FA|\u00DA/g, 'ú') // ú/Ú
-      .replace(/\u00E2|\u00C2/g, 'â') // â/Â
-      .replace(/\u00EA|\u00CA/g, 'ê') // ê/Ê
-      .replace(/\u00F4|\u00D4/g, 'ô') // ô/Ô
-      .replace(/\u00E3|\u00C3/g, 'ã') // ã/Ã
-      .replace(/\u00F5|\u00D5/g, 'õ') // õ/Õ
-      // Fix problematic characters
-      .replace(/Pra.a/g, 'Praça')
-      .replace(/\s+/g, ' ')
-      .trim();
   }
 
   /**

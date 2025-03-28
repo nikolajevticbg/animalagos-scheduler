@@ -19,6 +19,14 @@ alwaysApply: true
 – Never overwrite my .env file without first asking and confirming
 - Write comprehensive tests for all new or modified functionality
 
+# Coding workflow preferences
+
+- Focus on the areas of the code relevant to the task
+- Do not touch the code that is unrelated to the task
+- Write thorough tests for all major functionality
+- Avoid making major changes to the patterns and of how a feature works, after it has shown to work well, unless explicitly instructed
+- Always think bout what other methods and areas of code might be affected by code changes
+
 # AI General Guidelines
 
 - Follow the user’s requirements carefully & to the letter.

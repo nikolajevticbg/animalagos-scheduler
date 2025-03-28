@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import { AuthService } from './services/auth/auth.service';
 import * as fs from 'fs';
 import * as path from 'path';
+import { Credentials } from './types/credentials';
 
 // Load environment variables
 dotenv.config();
@@ -10,97 +11,95 @@ dotenv.config();
  * Main function to run the application
  */
 async function main(): Promise<void> {
-  try {
-    console.log('[Scheduler] Starting Animalagos Scheduler...');
-    
-    const credentials = getCredentials();
-    const authService = await performAuthentication(credentials);
-    
-    // Get available locations
-    console.log('[Scheduler] Getting available locations...');
-    const locations = await authService.getLocations();
-    
-    if (locations.length > 0) {
-      console.log(`[Scheduler] Found ${locations.length} locations:`);
-      locations.forEach((location, index) => {
-        console.log(`[Scheduler] ${index + 1}. ${location.name} (ID: ${location.id})`);
-      });
-      
-      // Save locations to a JSON file
-      saveLocationsToFile(locations);
-    } else {
-      console.error('[Scheduler] No locations found');
-    }
-    
-    console.log('[Scheduler] System ready.');
-    
-  } catch (error: unknown) {
-    handleError(error);
-    process.exit(1);
-  }
-}
-
-/**
- * Get credentials from environment variables
- */
-function getCredentials(): { email: string; password: string } {
-  const email = process.env.ANIMALAGOS_EMAIL;
-  const password = process.env.ANIMALAGOS_PASSWORD;
+  console.log(`[Scheduler] Starting Animalagos Scheduler...`);
   
-  if (!email || !password) {
-    throw new Error('Missing required environment variables: ANIMALAGOS_EMAIL and/or ANIMALAGOS_PASSWORD');
-  }
-  
-  return { email, password };
-}
-
-/**
- * Perform authentication to the Animalagos portal
- */
-async function performAuthentication(credentials: { email: string; password: string }): Promise<AuthService> {
+  // Initialize services
   const authService = AuthService.getInstance();
   
-  console.log('[Scheduler] Logging in to Animalagos portal...');
-  const isLoggedIn = await authService.login(credentials.email, credentials.password);
+  // Set up credentials for logging in
+  const credentials: Credentials = {
+    email: 'gitaroholicar@gmail.com',
+    password: '8707613'
+  };
   
-  if (!isLoggedIn) {
-    console.error('[Scheduler] Failed to login to Animalagos portal!');
-    process.exit(1);
-    return authService;
+  try {
+    console.log(`[Scheduler] Logging in to Animalagos portal...`);
+    const isLoggedIn = await authService.login(credentials.email, credentials.password);
+    
+    if (isLoggedIn) {
+      console.log(`[Scheduler] Successfully logged in to Animalagos portal!`);
+      
+      // Validate the session
+      console.log(`[Scheduler] Validating session...`);
+      const isSessionValid = await authService.validateSession();
+      
+      if (isSessionValid) {
+        console.log(`[Scheduler] Session is valid`);
+        
+        // Navigate to the artist timeline page
+        console.log(`[Scheduler] Navigating to artist timeline page...`);
+        const timelineSuccess = await authService.navigateToTimelinePage();
+        
+        if (timelineSuccess) {
+          console.log(`[Scheduler] Successfully accessed the artist timeline data`);
+          
+          // Check the HTML debug file to extract artist and location data
+          const debugFolder = path.join(process.cwd(), 'debug');
+          const timelineFile = path.join(debugFolder, 'timeline_access_attempt.html');
+          
+          if (fs.existsSync(timelineFile)) {
+            console.log(`[Scheduler] Analyzing timeline data from ${timelineFile}`);
+            const htmlContent = fs.readFileSync(timelineFile, 'utf8');
+            
+            // Count artists
+            const artistMatch = htmlContent.match(/<option>([^<]+)<\/option>/g);
+            const artistCount = artistMatch ? artistMatch.length - 2 : 0; // Subtract the "Artista" and "Todos" options
+            
+            // Count locations
+            const locationMatch = htmlContent.match(/<option>([^<]+)<\/option>\s+<\/select>/);
+            const locationStartIndex = htmlContent.indexOf('<option  value="">Rua/ Praça</option>');
+            const locationEndIndex = htmlContent.indexOf('</select>', locationStartIndex);
+            const locationSection = htmlContent.substring(locationStartIndex, locationEndIndex);
+            const locationCount = (locationSection.match(/<option>/g) || []).length - 2; // Subtract the "Rua/ Praça" and "Todos" options
+            
+            console.log(`[Scheduler] Found ${artistCount} artists and ${locationCount} locations in the timeline data`);
+            console.log(`[Scheduler] Ready to implement scheduling functionality`);
+          }
+        } else {
+          console.log(`[Scheduler] Failed to access the artist timeline data`);
+        }
+      } else {
+        console.log(`[Scheduler] Session validation failed`);
+      }
+    } else {
+      console.log(`[Scheduler] Failed to log in to Animalagos portal`);
+    }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error(`[Scheduler] Error: ${errorMessage}`);
   }
   
-  console.log('[Scheduler] Successfully logged in to Animalagos portal!');
-  await validateSession(authService);
-  return authService;
+  console.log(`[Scheduler] System ready.`);
 }
 
 /**
- * Validate the current session
+ * Save debug info to a file
  */
-async function validateSession(authService: AuthService): Promise<void> {
-  console.log('[Scheduler] Validating session...');
-  const isSessionValid = await authService.validateSession();
-  console.log(`[Scheduler] Session is ${isSessionValid ? 'valid' : 'invalid'}`);
-}
-
-/**
- * Save locations to a JSON file
- */
-function saveLocationsToFile(locations: { id: string; name: string }[]): void {
+export function saveDebugInfo(data: any, filename: string): void {
   try {
-    // Create data directory if it doesn't exist
-    const dataDir = path.join(process.cwd(), 'data');
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
+    // Create debug directory if it doesn't exist
+    const debugDir = path.join(process.cwd(), 'debug');
+    if (!fs.existsSync(debugDir)) {
+      fs.mkdirSync(debugDir, { recursive: true });
     }
     
     // Write the data to a file
-    const filePath = path.join(dataDir, 'locations.json');
-    fs.writeFileSync(filePath, JSON.stringify(locations, null, 2));
-    console.log(`[Scheduler] Saved ${locations.length} locations to ${filePath}`);
+    const filePath = path.join(debugDir, filename);
+    fs.writeFileSync(filePath, typeof data === 'string' ? data : JSON.stringify(data, null, 2));
+    console.log(`[Scheduler] Saved debug info to ${filePath}`);
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error(`[Scheduler] Error saving locations to file: ${errorMessage}`);
+    console.error(`[Scheduler] Error saving debug info: ${errorMessage}`);
   }
 }
 
