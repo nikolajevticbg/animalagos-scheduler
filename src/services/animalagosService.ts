@@ -222,5 +222,52 @@ export class AnimalagosService {
     }
   }
 
-  // ... rest of the class ...
+  /**
+   * Parse HTML content to extract timeline data
+   * @param htmlContent - HTML content to parse
+   * @param date - Date in DD-MM-YYYY format
+   * @param place - Name of the place/location
+   * @returns Parsed timeline data
+   */
+  private parseHtmlContent(htmlContent: string, date: string, place: string): TimelineResponse {
+    // Simple implementation - in a real scenario, you would use a DOM parser
+    const artists: Artist[] = [];
+    
+    // Return the structured data
+    return {
+      artists,
+      date,
+      place
+    };
+  }
+
+  /**
+   * Save debug response to a file
+   * @param filename - Name of the file to save
+   * @param data - Data to save
+   */
+  private saveDebugResponse(filename: string, data: any): void {
+    try {
+      const filePath = path.join(this.debugDir, filename);
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+      console.log(`[AnimalagosService] Debug data saved to ${filePath}`);
+    } catch (error) {
+      console.error(`[AnimalagosService] Error saving debug data:`, error);
+    }
+  }
+
+  /**
+   * Save HTML response to a file
+   * @param htmlContent - HTML content to save
+   * @param filename - Name of the file to save
+   */
+  private saveHtmlResponse(htmlContent: string, filename: string): void {
+    try {
+      const filePath = path.join(this.debugDir, filename);
+      fs.writeFileSync(filePath, htmlContent);
+      console.log(`[AnimalagosService] HTML response saved to ${filePath}`);
+    } catch (error) {
+      console.error(`[AnimalagosService] Error saving HTML response:`, error);
+    }
+  }
 }

@@ -1,0 +1,41 @@
+/**
+ * Schedule configuration for April 2025
+ * 
+ * Each entry represents a reservation to be made
+ * - day: Day of month (1-30 for April)
+ * - location: The location/street name
+ * - timeSlot: Time slot in format HH:MM HH:MM
+ */
+export interface ScheduleEntry {
+  day: string;
+  location: string;
+  timeSlot: string;
+}
+
+/**
+ * Mapping of Serbian day names to English day names
+ */
+export const dayMapping: Record<string, number> = {
+  'Ponedeljak': 1,  // Monday
+  'Utorak': 2,      // Tuesday
+  'Sreda': 3,       // Wednesday
+  'Cetvrtak': 4,    // Thursday
+  'Petak': 5,       // Friday
+  'Subota': 6,      // Saturday
+  'Nedelja': 0,     // Sunday
+};
+
+/**
+ * The full schedule for April 2025 and March 31
+ */
+export const aprilSchedule: ScheduleEntry[] = [
+  // Monday (Ponedeljak) - March 31
+  { day: "31-03-2025", location: "Praça Gil Eanes", timeSlot: "13:30 14:30" },
+];
+
+/**
+ * Generate schedule for the whole month based on weekly pattern
+ */
+export function generateMonthlySchedule(): ScheduleEntry[] {
+  return aprilSchedule;
+} 

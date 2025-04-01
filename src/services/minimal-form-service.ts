@@ -2,6 +2,7 @@ import { client } from '../config/axios.config';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Cookie } from 'tough-cookie';
+import { buildFormData } from '../utils/encoding';
 
 /**
  * Interface for login form data
@@ -184,15 +185,27 @@ export class AnimalagosService {
     const formData = { ...defaultData, ...options };
     
     try {
-      // Submit using the axios client that already has authentication cookies
-      const response = await client.post(`${this.baseUrl}/artista/inscricao-artista`, formData, {
+      // Log the original location text for debugging
+      console.log(`[${this.serviceName}] Original location text: "${formData.c}"`);
+      
+      // Build form data with Latin-1 encoding for location field
+      const formBody = buildFormData(formData, ['c']);
+      
+      console.log(`[${this.serviceName}] Submitting form with mixed encoding:`, formBody);
+      
+      // Send with explicit headers specifying Latin-1 charset
+      const response = await client.post(`${this.baseUrl}/artista/inscricao-artista`, formBody, {
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Type': 'application/x-www-form-urlencoded; charset=ISO-8859-1',
           'Referer': `${this.baseUrl}/artista/timeline`,
           'Origin': 'https://animalagos.com',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5'
-        }
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        },
+        transformRequest: [(data) => data] // Prevent axios from transforming data
       });
 
       return response;
